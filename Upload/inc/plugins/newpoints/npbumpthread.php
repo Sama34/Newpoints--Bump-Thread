@@ -1,20 +1,34 @@
 <?php
 
-/* Original "Bump Thread" plugin by Zinga Burga (Yumi).
- * Modified/adapted by Sama34 (Omar U.) to work alogn with MyBB's points plugin, "Newpoins" by Piarata Nervo.
- * One function from "HTML In Posts" plugin by Pirata Nervo as well.
- * Most thanks to those developers for their hard work!!!
+/***************************************************************************
  *
- * Zinga Burga (Yumi): http://mybbhacks.zingaburga.com/
- * Pirata Nervo: http://forums.mybb-plugins.com/
- * Sama34 (Omar U.): http://udezain.com.ar/
-*/
+ *   Newpoints Bump Thread plugin (/inc/plugins/newpoints/npbumpthread.php)
+ *	 Author: Omar Gonzalez
+ *   Copyright: © 2012 Omar Gonzalez
+ *   
+ *   Website: http://community.mybb.com/user-25096.html
+ *
+ *   Allows users to bump their own threads without postingon exchange of points.
+ *
+ ***************************************************************************
+ 
+****************************************************************************
+	This program is free software: you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation, either version 3 of the License, or
+	(at your option) any later version.
+	
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	GNU General Public License for more details.
+	
+	You should have received a copy of the GNU General Public License
+	along with this program.  If not, see <http://www.gnu.org/licenses/>.
+****************************************************************************/
 
 // Disallow direct access to this file for security reasons
-if(!defined('IN_MYBB'))
-{
-	die("Direct initialization of this file is not allowed.<br /><br />Please make sure IN_MYBB is defined.");
-}
+defined('IN_MYBB') or die('Direct initialization of this file is not allowed.');
 
 // Add the hooks we are going to use.
 if(defined("IN_ADMINCP"))
@@ -32,347 +46,472 @@ else
 {
 	$plugins->add_hook('datahandler_post_insert_post', 'npbumpthread_newpost');
 	$plugins->add_hook('datahandler_post_insert_thread', 'npbumpthread_newthread');
-	$plugins->add_hook('showthread_start', 'npbumpthread_run');
-	$plugins->add_hook('forumdisplay_start', 'npbumpthread_foruminject');
-	$plugins->add_hook('global_start', 'npbumpthread_cachetemplate');
+	$plugins->add_hook('showthread_start', 'npbumpthread_run', -9);
+
+	if(THIS_SCRIPT == 'showthread.php')
+	{
+		global $templatelist;
+
+		if(isset($templatelist))
+		{
+			$templatelist .= ',';
+		}
+		else
+		{
+			$templatelist = '';
+		}
+		$templatelist .= 'npbumpthread';
+	}
+	elseif(THIS_SCRIPT == 'forumdisplay.php')
+	{
+		control_object($GLOBALS['db'], '
+			function query($string, $hide_errors=0, $write_query=0)
+			{
+				if(strpos($conditions, \'lastpost\'))
+				{
+					$string = str_replace(array(\'(lastpost\', \'(t.lastpost\'), array(\'(lastpostbump\', \'(t.lastpostbump\'), $string);
+				}
+				return parent::query($string, $hide_errors, $write_query);
+			}
+		');
+	}
 }
 
 /*** Newpoints ACP side. ***/
 function npbumpthread_info()
 {
 	global $mybb, $lang;
-	newpoints_lang_load("npbumpthread"); // Load ./inc/plugins/newpoints/languages/LANG/admin/npbumpthread.lang.php
+	isset($lang->bt_plugin) or newpoints_lang_load('npbumpthread');
 
 	if($mybb->input['module'] == 'newpoints-plugins')
 	{
-		$lang->bt_acp_plugind .= '<br/><br/><p style="padding-left:10px;margin:0;">'.$lang->bt_acp_plugind2.'</p>';
+		$lang->bt_plugin_d .= '<br/><br/><p style="padding-left:10px;margin:0;">'.$lang->bt_plugin_d2.'</p>';
 	}
 	return array(
-		'name'			=> $lang->bt_acp_plugint,
-		'description'	=> $lang->bt_acp_plugind,
-		//'website'		=> 'http://mybbhacks.zingaburga.com/',
+		'name'			=> 'Bump Thread',
+		'description'	=> $lang->bt_plugin_d,
 		'website'		=> 'http://forums.mybb-plugins.com/Thread-Adapted-Bump-Threads',
-		'author'		=> 'ZiNgA BuRgA',
-		'authorsite'	=> 'http://zingaburga.com/',
-		'version'		=> '1.1',
-		'compatibility'	=> '16*',
-		'codename'		=> 'npbumpthread',
+		'author'		=> 'Omar Gonzalez',
+		'authorsite'	=> 'http://community.mybb.com/user-25096.html',
+		'version'		=> '1.2',
+		'compatibility'	=> '19*'
 	);
 }
+
+// _activate
 function npbumpthread_activate()
 {
-	global $mybb;
-	// Add the plugin template.
-	newpoints_add_template("npbumpthread", '<a href="{$threadlink}?action=bump" title="{$bt_title}" rel="nofollow"><img src="{$theme[\'imglangdir\']}/npbumpthread.gif" alt="{$bt_title}" title="{$bt_title}" /></a>&nbsp;', "-1");
-	// Modify the showthread template to add the button variable.
+	global $db, $lang;
+	isset($lang->bt_plugin) or newpoints_lang_load('npbumpthread');
+
+	// Add the template if not already exiting
+	$template = $db->simple_select('templates', '*', 'title=\'npbumpthread\' AND sid=\'-1\'');
+	if(!$db->num_rows($template))
+	{
+		newpoints_add_template('npbumpthread', '<a href="{$threadlink}" title="{$title}" rel="nofollow"><img src="{$theme[\'imglangdir\']}/npbumpthread.gif" alt="{$title}" title="{$title}" /></a>&nbsp;');
+	}
+
+	// Now we can insert our settings
+	$settings = array(
+		'interval'	=> array(
+			'value'		=> 30,
+			'disporder'	=> 1
+		),
+		'forums'	=> array(
+			'value'		=> '2,3',
+			'disporder'	=> 2
+		),
+		'groups'	=> array(
+			'value'		=> '3,4',
+			'disporder'	=> 3
+		),
+		'points'	=> array(
+			'value'		=> 10,
+			'disporder'	=> 4
+		)
+	);
+	$db->update_query('newpoints_settings', array('description' => 'DELETE_ME'), 'plugin=\'npbumpthread\'');
+	foreach($settings as $key => $setting)
+	{
+		$lang_val = 'bt_set_'.$key;
+		$lang_val_d = $lang_val.'_d';
+		$alreadyexists = $db->num_rows($db->simple_select('newpoints_settings', 'name', 'plugin=\'npbumpthread\' AND name=\'npbumpthread_'.$key.'\''));
+		if($alreadyexists)
+		{
+			$db->update_query('newpoints_settings', array(
+				'title'			=> $db->escape_string($lang->$lang_val),
+				'description'	=> $db->escape_string($lang->$lang_val_d),
+				'disporder'		=> $setting['disporder']
+			), 'plugin=\'npbumpthread\' AND name=\'npbumpthread_'.$key.'\'');
+		}
+		else
+		{
+			newpoints_add_setting('npbumpthread_'.$key, 'npbumpthread', $lang->$lang_val, $lang->$lang_val_d, 'text', $setting['value'], $setting['disporder']);
+		}
+	}
+	$db->delete_query('newpoints_settings', 'plugin=\'npbumpthread\' AND description=\'DELETE_ME\'');
+
+	// Update some things
+	$db->field_exists('lastpostbump', 'users') or $db->add_column('users', 'lastpostbump', 'int(10) NOT NULL DEFAULT \'0\'');
+	$db->modify_column('threads', 'lastpostbump', 'int(10) NOT NULL DEFAULT \'0\'');
+	$db->modify_column('newpoints_grouprules', 'bumps_rate', 'float NOT NULL default \'1\'');
+	$db->modify_column('newpoints_forumrules', 'bumps_rate', 'float NOT NULL default \'1\'');
+	$db->modify_column('newpoints_grouprules', 'bumps_forums', 'text NOT NULL');
+	$db->modify_column('newpoints_forumrules', 'bumps_groups', 'text NOT NULL');
+	$db->modify_column('newpoints_grouprules', 'bumps_interval', 'int(10) NOT NULL DEFAULT \'0\'');
+	$db->modify_column('newpoints_forumrules', 'bumps_interval', 'int(10) NOT NULL DEFAULT \'0\'');
+
+	// Add the button variable
 	require_once MYBB_ROOT.'/inc/adminfunctions_templates.php';
 	find_replace_templatesets('showthread', '#'.preg_quote('{$newreply}').'#', '{$npbumpthread}{$newreply}');
 }
+
+// _deactivate
 function npbumpthread_deactivate()
 {
-	global $mybb;
-	// Remove the plugin template.
-	newpoints_remove_templates("'npbumpthread'");
-	// Modify the showthread template to remove the button variable.
+	// Remove the button variable
 	require_once MYBB_ROOT.'/inc/adminfunctions_templates.php';
 	find_replace_templatesets('showthread', '#'.preg_quote('{$npbumpthread}').'#', '',0);
-
 }
+
+// _install
 function npbumpthread_install()
 {
-	global $db, $mybb, $lang;
+	global $db;
 
-	// First we need to remove the plugin settings.
-	newpoints_remove_settings("'npbumpthread_on', 'npbumpthread_interval', 'npbumpthread_forums', 'npbumpthread_groups', 'npbumpthread_points'");
-	// Now we can insert them so everything is clean.
-	newpoints_lang_load("npbumpthread");
-	newpoints_add_setting("npbumpthread_on", "npbumpthread", $lang->bt_acp_setting_on_n, $lang->bt_acp_setting_on_d, "onoff", "0", "1");
-	newpoints_add_setting("npbumpthread_interval", "npbumpthread", $lang->bt_acp_setting_time_n, $lang->bt_acp_setting_time_d, "text", "30", "2");
-	newpoints_add_setting("npbumpthread_forums", "npbumpthread", $lang->bt_acp_setting_forums_n, $lang->bt_acp_setting_forums_d, "text", "2,3", "3");
-	newpoints_add_setting("npbumpthread_groups", "npbumpthread", $lang->bt_acp_setting_groups_n, $lang->bt_acp_setting_groups_d, "text", "3,4", "4");
-	newpoints_add_setting("npbumpthread_points", "npbumpthread", $lang->bt_acp_setting_points_n, $lang->bt_acp_setting_points_d, "text", "10", "6");
-	rebuild_settings();
+	// Add the columns now and update the "lastpostbump" column
+	$db->field_exists('lastpostbump', 'threads') or $db->add_column('threads', 'lastpostbump', 'int(10) NOT NULL DEFAULT \'0\'');
+	$db->update_query('threads', array('lastpostbump' => '`lastpost`'), '', '', true);
+	#$db->query('UPDATE '.TABLE_PREFIX.'threads SET lastpostbump=lastpost');
 
-	// We need to check is our plugin columns exist, if they do, then drop them...
-	if($db->field_exists('lastpostbump', 'threads'))
-	{
-		$db->drop_column("threads", "lastpostbump");
-	}
-	if($db->field_exists('bumps_rate', 'newpoints_grouprules'))
-	{
-		$db->drop_column("newpoints_grouprules", "bumps_rate");
-	}
-	if($db->field_exists('bumps_rate', 'newpoints_forumrules'))
-	{
-		$db->drop_column("newpoints_forumrules", "bumps_rate");
-	}
-	if($db->field_exists('bumps_forums', 'newpoints_grouprules'))
-	{
-		$db->drop_column("newpoints_grouprules", "bumps_forums");
-	}
-	if($db->field_exists('bumps_groups', 'newpoints_forumrules'))
-	{
-		$db->drop_column("newpoints_forumrules", "bumps_groups");
-	}
-	// Add the columns now amd update the "lastpostbump" column at least.
-	$db->add_column("threads", "lastpostbump", "BIGINT(30) UNSIGNED NOT NULL DEFAULT '0'");
-	$db->add_column("newpoints_grouprules", "bumps_rate", "float NOT NULL default '1'");
-	$db->add_column("newpoints_forumrules", "bumps_rate", "float NOT NULL default '1'");
-	$db->add_column("newpoints_grouprules", "bumps_forums", "text NOT NULL default ''");
-	$db->add_column("newpoints_forumrules", "bumps_groups", "text NOT NULL default ''");
-	$db->query('UPDATE '.$db->table_prefix.'threads SET lastpostbump=lastpost');
+	$db->field_exists('bumps_rate', 'newpoints_grouprules') or $db->add_column('newpoints_grouprules', 'bumps_rate', 'float NOT NULL default \'1\'');
+	$db->field_exists('bumps_rate', 'newpoints_forumrules') or $db->add_column('newpoints_forumrules', 'bumps_rate', 'float NOT NULL default \'1\'');
+	$db->field_exists('bumps_forums', 'newpoints_grouprules') or $db->add_column('newpoints_grouprules', 'bumps_forums', 'text NOT NULL');
+	$db->field_exists('bumps_groups', 'newpoints_forumrules') or $db->add_column('newpoints_forumrules', 'bumps_groups', 'text NOT NULL');
+	$db->field_exists('bumps_interval', 'newpoints_grouprules') or $db->add_column('newpoints_grouprules', 'bumps_interval', 'int(10) NOT NULL DEFAULT \'0\'');
+	$db->field_exists('bumps_interval', 'newpoints_forumrules') or $db->add_column('newpoints_forumrules', 'bumps_interval', 'int(10) NOT NULL DEFAULT \'0\'');
+	$db->field_exists('lastpostbump', 'users') or $db->add_column('users', 'lastpostbump', 'int(10) NOT NULL DEFAULT \'0\'');
 }
+
+// _uninstall
 function npbumpthread_uninstall()
 {
 	global $db, $mybb;
 
 	// Remove the plugin settings.
-	newpoints_remove_settings("'npbumpthread_on', 'npbumpthread_interval', 'npbumpthread_forums', 'npbumpthread_groups', 'npbumpthread_points'");
-	rebuild_settings();
+	newpoints_remove_settings("'npbumpthread_interval', 'npbumpthread_forums', 'npbumpthread_groups', 'npbumpthread_points'");
+
+	// Remove the plugin template.
+	newpoints_remove_templates("'npbumpthread'");
 
 	// Remove the plugin columns, if any...
-	if($db->field_exists('lastpostbump', 'threads'))
-	{
-		$db->drop_column("threads", "lastpostbump");
-	}
-	if($db->field_exists('bumps_rate', 'newpoints_grouprules'))
-	{
-		$db->drop_column("newpoints_grouprules", "bumps_rate");
-	}
-	if($db->field_exists('bumps_rate', 'newpoints_forumrules'))
-	{
-		$db->drop_column("newpoints_forumrules", "bumps_rate");
-	}
-	if($db->field_exists('bumps_forums', 'newpoints_grouprules'))
-	{
-		$db->drop_column("newpoints_grouprules", "bumps_forums");
-	}
-	if($db->field_exists('bumps_groups', 'newpoints_forumrules'))
-	{
-		$db->drop_column("newpoints_forumrules", "bumps_groups");
-	}
+	!$db->field_exists('lastpostbump', 'threads') or $db->drop_column('threads', 'lastpostbump');
+	!$db->field_exists('bumps_rate', 'newpoints_grouprules') or $db->drop_column('newpoints_grouprules', 'bumps_rate');
+	!$db->field_exists('bumps_rate', 'newpoints_forumrules') or $db->drop_column('newpoints_forumrules', 'bumps_rate');
+	!$db->field_exists('bumps_forums', 'newpoints_grouprules') or $db->drop_column('newpoints_grouprules', 'bumps_forums');
+	!$db->field_exists('bumps_groups', 'newpoints_forumrules') or $db->drop_column('newpoints_forumrules', 'bumps_groups');
+	!$db->field_exists('bumps_interval', 'newpoints_grouprules') or $db->drop_column('newpoints_grouprules', 'bumps_interval');
+	!$db->field_exists('bumps_interval', 'newpoints_forumrules') or $db->drop_column('newpoints_forumrules', 'bumps_interval');
+	!$db->field_exists('lastpostbump', 'users') or $db->drop_column('users', 'lastpostbump');
 
 	// Clean any logs from this plugin.
-	newpoints_remove_log(array("bump"));
+	newpoints_remove_log(array('bump'));
 }
+
+// _is_insalled
 function npbumpthread_is_installed()
 {
 	global $db;
-	if($db->field_exists('lastpostbump', 'threads') || $db->field_exists('bumps_rate', 'newpoints_grouprules') || $db->field_exists('bumps_rate', 'newpoints_forumrules'))
-	{
-		return true;
-	}
-	return false;
+
+	return $db->field_exists('lastpostbump', 'threads');
 }
 
-/*** Newpoints ACP side. ***/
+// Add our containers to the group rles page
 function npbumpthread_admin_grouprules(&$form_container)
-{
-	global $mybb, $db, $lang, $form, $rule;
-	newpoints_lang_load("npbumpthread");
-
-	// If adding a group rule..
-	if($mybb->input['action'] == 'add')
-	{
-		$form_container->output_row($lang->bt_acp_rulerate, $lang->bt_acp_grouprule, $form->generate_text_box('bumps_rate', '1', array('id' => 'bumps_rate')), 'bumps_rate');
-		$form_container->output_row($lang->bt_acp_rule_forums_n, $lang->bt_acp_rule_forums_d, $form->generate_text_box('bumps_forums', '', array('id' => 'bumps_forums')), 'bumps_forums');
-	}
-	// If editing a group rule..
-	elseif($mybb->input['action'] == 'edit')
-	{
-		$form_container->output_row($lang->bt_acp_rulerate, $lang->bt_acp_grouprule, $form->generate_text_box('bumps_rate', $rule['bumps_rate'], array('id' => 'bumps_rate')), 'bumps_rate');
-		$form_container->output_row($lang->bt_acp_rule_forums_n, $lang->bt_acp_rule_forums_d, $form->generate_text_box('bumps_forums', $rule['bumps_forums'], array('id' => 'bumps_forums')), 'bumps_forums');
-	}
-}
-function npbumpthread_admin_grouprules_post(&$array)
-{
-	global $mybb, $db, $lang, $form, $rule;
-
-	// Insert the value..?
-	$array['bumps_rate'] = floatval($mybb->input['bumps_rate']);
-	$array['bumps_forums'] = $mybb->input['bumps_forums'];
-}
-function npbumpthread_admin_forumrules()
-{
-	global $mybb, $db, $lang, $form, $rule, $form_container;
-	newpoints_lang_load("npbumpthread");
-
-	// If adding a forum rule..
-	if($mybb->input['action'] == 'add')
-	{
-		$form_container->output_row($lang->bt_acp_rulerate, $lang->bt_acp_forumrule, $form->generate_text_box('bumps_rate', '1', array('id' => 'bumps_rate')), 'bumps_rate');
-		$form_container->output_row($lang->bt_acp_rule_groups_n, $lang->bt_acp_rule_groups_d, $form->generate_text_box('bumps_groups', '', array('id' => 'bumps_groups')), 'bumps_rate');
-	}
-	// If editing a forum rule..
-	elseif($mybb->input['action'] == 'edit')
-	{
-		$form_container->output_row($lang->bt_acp_rulerate, $lang->bt_acp_forumrule, $form->generate_text_box('bumps_rate', $rule['bumps_rate'], array('id' => 'bumps_rate')), 'bumps_rate');
-		$form_container->output_row($lang->bt_acp_rule_groups_n, $lang->bt_acp_rule_groups_d, $form->generate_text_box('bumps_groups', $rule['bumps_groups'], array('id' => 'bumps_groups')), 'bumps_groups');
-	}
-}
-function npbumpthread_admin_forumrules_post(&$array)
-{
-	global $mybb, $db, $lang, $form, $rule;
-
-	// Insert the value..?
-	$array['bumps_rate'] = floatval($mybb->input['bumps_rate']);
-	$array['bumps_groups'] = $mybb->input['bumps_groups'];
-}
-
-/*** Forum side. ***/
-function npbumpthread_cachetemplate()
-{
-	global $templatelist, $current_page;
-	if($current_page == 'showthread.php' && isset($templatelist))
-	{
-		$templatelist = str_replace(',index_whosonline,', ',index_whosonline,index_whosonline_today,', $templatelist);
-	}
-}
-function npbumpthread_check_permissions($groups_comma)
 {
 	global $mybb;
 
-	if($groups_comma == '')
+	// If adding a group rule..
+	if($mybb->input['action'] == 'add' || $mybb->input['action'] == 'edit')
 	{
-		return false;
-	}
-	$groups = explode(",", $groups_comma);
-	
-	$ourgroups = explode(",", $mybb->user['additionalgroups']);
-	$ourgroups[] = $mybb->user['usergroup'];
+		global $lang, $form, $rule;
+		isset($lang->bt_plugin) or newpoints_lang_load('npbumpthread');
 
-	if(count(array_intersect($ourgroups, $groups)) == 0)
-	{
-		return false;
+		$form_container->output_row($lang->bt_rule_grouprate, $lang->bt_rule_grouprate_d, $form->generate_text_box('bumps_rate', (isset($rule['bumps_rate']) ? (float)$rule['bumps_rate'] : 1), array('id' => 'bumps_rate')), 'bumps_rate');
+		$form_container->output_row($lang->bt_rule_groupforums, $lang->bt_rule_groupforums_d, $form->generate_text_box('bumps_forums', (isset($rule['bumps_forums']) ? npbumpthread_clean_array($rule['bumps_forums'], true) : ''), array('id' => 'bumps_forums')), 'bumps_forums');
+		$form_container->output_row($lang->bt_rule_forumgroups_interval, $lang->bt_rule_forumgroups_interval_d, $form->generate_text_box('bumps_interval', (isset($rule['bumps_interval']) ? (int)$rule['bumps_interval'] : ''), array('id' => 'bumps_interval')), 'bumps_interval');
 	}
-	else
+}
+
+// Update group rules
+function npbumpthread_admin_grouprules_post(&$array)
+{
+	global $mybb;
+
+	// Insert the value..?
+	$array['bumps_rate'] = (float)$mybb->input['bumps_rate'];
+	$array['bumps_forums'] = npbumpthread_clean_array($mybb->input['bumps_forums']);
+	$array['bumps_interval'] = (int)$mybb->input['bumps_interval'];
+}
+
+// Add our containers to the forum rles page
+function npbumpthread_admin_forumrules()
+{
+	global $mybb;
+
+	// If adding a forum rule..
+	if($mybb->input['action'] == 'add' || $mybb->input['action'] == 'edit')
+	{
+		global $mybb, $lang, $form, $rule, $form_container;
+		isset($lang->bt_plugin) or newpoints_lang_load('npbumpthread');
+
+		$form_container->output_row($lang->bt_rule_forumrate, $lang->bt_rule_forumrate_d, $form->generate_text_box('bumps_rate', (isset($rule['bumps_rate']) ? (float)$rule['bumps_rate'] : 1), array('id' => 'bumps_rate')), 'bumps_rate');
+		$form_container->output_row($lang->bt_rule_forumgroups, $lang->bt_rule_forumgroups_d, $form->generate_text_box('bumps_groups', (isset($rule['bumps_groups']) ? npbumpthread_clean_array($rule['bumps_groups'], true) : ''), array('id' => 'bumps_groups')), 'bumps_groups');
+		$form_container->output_row($lang->bt_rule_forumgroups_interval, $lang->bt_rule_forumgroups_interval_d, $form->generate_text_box('bumps_interval', (isset($rule['bumps_interval']) ? (int)$rule['bumps_interval'] : ''), array('id' => 'bumps_interval')), 'bumps_interval');
+	}
+}
+
+// Update forum rules
+function npbumpthread_admin_forumrules_post(&$array)
+{
+	global $mybb;
+
+	// Insert the value..?
+	$array['bumps_rate'] = (float)$mybb->input['bumps_rate'];
+	$array['bumps_groups'] = npbumpthread_clean_array($mybb->input['bumps_groups']);
+	$array['bumps_interval'] = (int)$mybb->input['bumps_interval'];
+}
+
+// Check if user meets user group memberships
+function npbumpthread_check_groups($groups_comma)
+{
+	if(empty($groups) && $empty)
 	{
 		return true;
 	}
+
+	global $mybb;
+	$usergroups = explode(',', $mybb->user['additionalgroups']);
+	$usergroups[] = $mybb->user['usergroup'];
+
+	return (bool)array_intersect(array_map('intval', explode(',', $groups)), array_map('intval', $usergroups));
 }
-function npbumpthread_newthread(&$ph)
+
+// We need to insert the bump dateline before the thread is actually inserted
+function npbumpthread_newthread(&$dh)
 {
-	$ph->thread_insert_data['lastpostbump'] = $ph->data['dateline'];
+	$dh->thread_insert_data['lastpostbump'] = (int)$dh->data['dateline'];
 }
-function npbumpthread_newpost(&$ph)
+
+// Update thread bump date when inserting a new reply
+function npbumpthread_newpost(&$dh)
 {
 	global $db;
-	$db->update_query('threads', array('lastpostbump' => TIME_NOW), 'tid='.$ph->data['tid']);
+
+	$db->update_query('threads', array('lastpostbump' => TIME_NOW), 'tid='.(int)$dh->data['tid']);
 }
+
 function npbumpthread_run()
 {
-	global $mybb, $thread, $lang;
-	newpoints_lang_load("npbumpthread");
+	global $thread, $mybb, $lang;
+	isset($lang->bt_plugin) or newpoints_lang_load('npbumpthread');
 
-	//*** Check if there are rules for this forum...
-	$forumrules = newpoints_getrules('forum', $thread['fid']);
-		// Allowed groups is global plugin groups.
-		$allowed_groups = $mybb->settings['npbumpthread_groups'];
-		// There are forum rules and 'bumps_groups' is not empty, overwrite global plugin allowed usergroups...
-		if($forumrules && !empty($forumrules['bumps_groups']))
-		{
-			$allowed_groups = $forumrules['bumps_groups']; // Allowed groups is forum rules allowed groups.
-		}
-	//*** Check if there are rules for this usergroup...
-	$groupsrules = newpoints_getrules('group', $mybb->user['usergroup']);
-		// Allowed forums is global plugin forums.
-		$allowed_forums = $mybb->settings['npbumpthread_forums'];
-		// There are group rules and 'bumps_forums' is not empty, overwrite global plugin allowed forums...
-		if($groupsrules && !empty($groupsrules['bumps_forums']))
-		{
-			$allowed_forums = $groupsrules['bumps_forums']; // Allowed forums is group rules allowed forums.
-		}
-		$allowed_forum = explode(",", $allowed_forums);
-
-	// Basic information to know if continue or just ignore current user/location/plugin status.
-	if($mybb->settings['npbumpthread_on'] != 0 && $thread['closed'] != 1 && $mybb->user['uid'] != '0' && (npbumpthread_check_permissions($allowed_groups) || empty($allowed_groups)) && (in_array($thread['fid'], $allowed_forum) || empty($allowed_forums)))
+	// Some primary checks, simple first, complicated follows
+	if(!(bool)$mybb->settings['npbumpthread_on'] || $thread['closed'])
 	{
-		$lastpostbump = $thread['lastpostbump'];
-		$npbt_cancp = $mybb->usergroup['cancp'];
-		$npbt_smod = $mybb->usergroup['issupermod'];
-		$npbt_interval = intval($mybb->settings['npbumpthread_interval']);
-		$points = intval($mybb->settings['npbumpthread_points']);
-		$threadlink = get_thread_link($thread['tid']);
-		// If action is "bump"...
-		if($mybb->input['action'] == "bump")
+		return;
+	}
+
+	// Get newpoints rules
+	$forumrules = newpoints_getrules('forum', $thread['fid']);
+	$groupsrules = newpoints_getrules('group', $mybb->user['usergroup']);
+
+	// Allowed forums
+	$allowed_forums = $mybb->settings['npbumpthread_forums'];
+	if(!empty($groupsrules['bumps_forums']) || $groupsrules['bumps_forums'] == '0')
+	{
+		$allowed_forums = $groupsrules['bumps_forums'];
+	}
+	$allowed_forum = npbumpthread_clean_array($allowed_forums);
+
+	// Allowed groups
+	$allowed_groups = $mybb->settings['npbumpthread_groups'];
+	if(!empty($forumrules['bumps_groups']) || $forumrules['bumps_groups'] == '0')
+	{
+		$allowed_groups = $forumrules['bumps_groups'];
+	}
+	$allowed_groups = npbumpthread_clean_array($allowed_groups);
+
+	// Interval time
+	// The issue here is, should we use the largest interval ratio or the lowest one? This is "easy" to solve, allowing administrators to make use of the "-" sign inside the value to determine how it should work.
+	// The real issue, is if whether forum or groups rules should be checked before any other, the order can modify the end result. I decided to go with forum rule first.
+	$interval = (int)$mybb->settings['npbumpthread_interval'];
+	if(!empty($forumrules['bumps_interval']) || $forumrules['bumps_interval'] == '0')
+	{
+		$finterval = (int)$forumrules['bumps_interval'];
+		if(my_strpos($forumrules['bumps_interval'], '-'))
 		{
-			//If there are not forumrules, set default 'bumps_rate'...
-			if(!$forumrules)
-			{
-				$forumrules['bumps_rate'] = 1.0;
-			}
-			//If there are not grouprules, set default 'bumps_rate'...
-			if(!$groupsrules)
-			{
-				$groupsrules['bumps_rate'] = 1.0;
-			}
-			// Set $points based in groupsrules and forumrules.
-			$points = $points*floatval($groupsrules['bumps_rate'])*floatval($forumrules['bumps_rate']);
-			/*_*_*_*_*_*_*_*_*_*_*_*_*_*_*_*_*_*_*_*_*_*_*_*_**_*_*_*_*/
-			// If is not admin/global_mod/thread_author, show no permission page.
-			if($npbt_cancp != 1 && $npbt_smod != 1 && $thread['uid'] != $mybb->user['uid']){
-				error_no_permission();
-			}
-			// If is thread author and required points are highter that current user points, show error page.
-			elseif($thread['uid'] == $mybb->user['uid'] && $points > $mybb->user['newpoints']){
-				$points = newpoints_format_points($points);
-				error($lang->sprintf($lang->bt_no_enought_points, $points));
-			}
-			// Is the last bump was not so long ago (from settings), show error.
-			elseif($lastpostbump + $npbt_interval*60 > TIME_NOW){
-				error($lang->sprintf($lang->bt_bump_error, $npbt_interval));
-			}
-			// They passed trow here, so lets bump the thread!!
-			else
-			{
-				global $db;
-				$db->update_query('threads', array('lastpostbump' => TIME_NOW), 'tid='.$thread['tid']);
-				// If current user is thread author, remove points, otherwise, don't (so admins/global_mods can bump as much threads how they want, as long as they are not the original authors).
-				if($thread['uid'] == $mybb->user['uid']){
-					newpoints_addpoints($mybb->user['uid'], -(floatval($points)));
-				}
-				// Now log it...
-				newpoints_log("bump", $mybb->settings['bburl'].'/'.$threadlink, $mybb->user['username'], $mybb->user['uid']);
-				// GOOD!! Going back to thread...
-				redirect($threadlink, $lang->bt_bumped_message, $lang->bt_bumped_title);
-			}
+			$overwrite = ($finterval < $interval);
 		}
-		// If it is not  admin/global_mod/thread_author, show the button.
-		elseif($npbt_cancp == 1 || $npbt_smod == 1 || $thread['uid'] == $mybb->user['uid'])
+		else
 		{
-				global $templates, $theme, $npbumpthread;
-				$bt_title = $lang->bt_bumpthis;
-				if($lastpostbump + $npbt_interval*60 > TIME_NOW){
-					$lastpostbump = my_date($mybb->settings['dateformat'], $lastpostbump).', '.my_date($mybb->settings['timeformat'], $lastpostbump);
-					$bt_title = $lang->sprintf($lang->bt_lastbump, $lastpostbump);
-				}
-				eval('$npbumpthread = "'.$templates->get("npbumpthread").'";');
+			$overwrite = ($finterval > $interval);
+		}
+
+		if($overwrite)
+		{
+			$interval = $finterval;
 		}
 	}
-	elseif($mybb->input['action'] == "bump"){
-		error_no_permission();
+	if(!empty($groupsrules['bumps_interval']) || $groupsrules['bumps_interval'] == '0')
+	{
+		$ginterval = (int)$groupsrules['bumps_interval'];
+		if(my_strpos($groupsrules['bumps_interval'], '-'))
+		{
+			$overwrite = ($ginterval < $interval);
+		}
+		else
+		{
+			$overwrite = ($ginterval > $interval);
+		}
+
+		if($overwrite)
+		{
+			$interval = $ginterval;
+		}
 	}
+	
+	/*$db->modify_column('newpoints_grouprules', 'bumps_interval', 'text NOT NULL');
+	$db->modify_column('newpoints_forumrules', 'bumps_interval', 'text NOT NULL');*/
+
+	if(!npbumpthread_check_groups($allowed_groups) || !in_array($thread['fid'], $allowed_forum))
+	{
+		return;
+	}
+
+	$lastpostbump = my_date($mybb->settings['dateformat'], $thread['lastpostbump']).', '.my_date($mybb->settings['timeformat'], $thread['lastpostbump']);
+	$threadlink = get_thread_link($thread['tid'], 0, 'bump');
+
+	$permission = (is_moderator($thread['fid']) || $thread['uid'] == $mybb->user['uid']);
+	// Show the button.
+	if($permission)
+	{
+		global $templates, $theme, $npbumpthread;
+
+		$title = $lang->bt_bumpthis;
+		if($thread['lastpostbump']+$interval*60 > TIME_NOW)
+		{
+			$title = $lang->sprintf($lang->bt_lastbump, $lastpostbump);
+		}
+		eval('$npbumpthread = "'.$templates->get('npbumpthread').'";');
+	}
+
+	if($mybb->input['action'] != 'bump')
+	{
+		return;
+	}
+
+	// Request
+	if($mybb->user['uid'])
+	{
+		// Set $points based in groupsrules and forumrules.
+		$points = (float)$mybb->settings['npbumpthread_points']*(float)(isset($groupsrules['bumps_rate']) ? $groupsrules['bumps_rate'] : 1)*(float)(isset($forumrules['bumps_rate']) ? $forumrules['bumps_rate'] : 1);
+
+		// If is not admin/global_mod/thread_author, show no permission page.
+		$permission or error_no_permission();
+
+		// If is thread author and required points are highter that current user points, show error page.
+		if($thread['uid'] == $mybb->user['uid'] && $points > (float)$mybb->user['newpoints'])
+		{
+			error($lang->sprintf($lang->bt_no_enought_points, newpoints_format_points($points)));
+		}
+
+		// Is the last bump was not so long ago (from settings), show error.
+		if($thread['lastpostbump']+$interval*60 > TIME_NOW || $mybb->user['lastpostbump']+$interval*60 > TIME_NOW)
+		{
+			error($lang->sprintf($lang->bt_bump_error, my_format_nymber($interval)));
+		}
+
+		// They passed trow here, so lets bump the thread!!
+		global $db;
+		$db->update_query('threads', array('lastpostbump' => TIME_NOW), 'tid='.(int)$thread['tid']);
+		$db->delete_query('forumsread', 'fid=\''.(int)$thread['fid'].'\''); // someone might complain..
+		$db->delete_query('threadsread', 'tid=\''.(int)$thread['tid'].'\'');
+		// need we t modify search queries? may be..
+
+		// If current user is thread author, remove points, otherwise, don't (so admins/global_mods can bump as much threads how they want, as long as they are not the original authors).
+		if($thread['uid'] == $mybb->user['uid'])
+		{
+			newpoints_addpoints($mybb->user['uid'], -$points);
+		}
+		// Log it.
+		newpoints_log('bump', $mybb->settings['bburl'].'/'.$threadlink, $mybb->user['username'], $mybb->user['uid']);
+
+		redirect($threadlink, $lang->bt_bumped_message, $lang->bt_bumped_title);
+	}
+
+	error_no_permission();
 }
-function npbumpthread_foruminject()
+
+// Clean an array, too lazy
+function npbumpthread_clean_array($array, $implode=false, $delimiter=',')
 {
-	global $db;
-	eval('
-		class BumpThreadDummyDB extends '.get_class($db).'
-		{
-			function BumpThreadDummyDB(&$olddb)
-			{
-				$vars = get_object_vars($olddb);
-				foreach($vars as $var => $val)
-					$this->$var = $val;
-			}
-			
-			function query($string, $hideerr=0)
-			{
-				$string = str_replace(\'t.lastpost\', \'t.lastpostbump\', $string);
-				return parent::query($string, $hideerr);
-			}
-		}
-	');
-	$db = new BumpThreadDummyDB($db);
+	if(!is_array($array))
+	{
+		$array = explode($delimiter, $array);
+	}
+
+	foreach($array as &$val)
+	{
+		$val = (int)$val;
+	}
+
+	$array = array_unique($array);
+
+	if($implode)
+	{
+		return implode($delimiter, $array);
+	}
+
+	return $array;
 }
-?>
+
+// control_object by Zinga Burga from MyBBHacks ( mybbhacks.zingaburga.com ), 1.62
+function control_object(&$obj, $code)
+{
+	static $cnt = 0;
+	$newname = '_objcont_'.(++$cnt);
+	$objserial = serialize($obj);
+	$classname = get_class($obj);
+	$checkstr = 'O:'.strlen($classname).':"'.$classname.'":';
+	$checkstr_len = strlen($checkstr);
+	if(substr($objserial, 0, $checkstr_len) == $checkstr)
+	{
+		$vars = array();
+		// grab resources/object etc, stripping scope info from keys
+		foreach((array)$obj as $k => $v)
+		{
+			if($p = strrpos($k, "\0"))
+			{
+				$k = substr($k, $p+1);
+			}
+			$vars[$k] = $v;
+		}
+		if(!empty($vars))
+		{
+			$code .= '
+				function ___setvars(&$a) {
+					foreach($a as $k => &$v)
+						$this->$k = $v;
+				}
+			';
+		}
+		eval('class '.$newname.' extends '.$classname.' {'.$code.'}');
+		$obj = unserialize('O:'.strlen($newname).':"'.$newname.'":'.substr($objserial, $checkstr_len));
+		if(!empty($vars))
+		{
+			$obj->___setvars($vars);
+		}
+	}
+	// else not a valid object or PHP serialize has changed
+}
