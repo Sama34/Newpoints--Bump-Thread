@@ -64,7 +64,7 @@ else
 	}
 	elseif(THIS_SCRIPT == 'forumdisplay.php')
 	{
-		control_object($GLOBALS['db'], '
+		npbumpthread_control_object($GLOBALS['db'], '
 			function query($string, $hide_errors=0, $write_query=0)
 			{
 				if(strpos($conditions, \'lastpost\'))
@@ -283,9 +283,9 @@ function npbumpthread_admin_forumrules_post(&$array)
 }
 
 // Check if user meets user group memberships
-function npbumpthread_check_groups($groups_comma)
+function npbumpthread_check_groups($groups)
 {
-	if(empty($groups) && $empty)
+	if(empty($groups))
 	{
 		return true;
 	}
@@ -477,7 +477,7 @@ function npbumpthread_clean_array($array, $implode=false, $delimiter=',')
 }
 
 // control_object by Zinga Burga from MyBBHacks ( mybbhacks.zingaburga.com ), 1.62
-function control_object(&$obj, $code)
+function npbumpthread_control_object(&$obj, $code)
 {
 	static $cnt = 0;
 	$newname = '_objcont_'.(++$cnt);
