@@ -431,7 +431,7 @@ function newpoints_bump_thread_run()
 		// Is the last bump was not so long ago (from settings), show error.
 		if($thread['lastpostbump']+$interval*60 > TIME_NOW || $mybb->user['lastpostbump']+$interval*60 > TIME_NOW)
 		{
-			error($lang->sprintf($lang->newpoints_bump_thread_error_interval, my_format_nymber($interval)));
+			error($lang->sprintf($lang->newpoints_bump_thread_error_interval, my_number_format($interval)));
 		}
 
 		// They passed trow here, so lets bump the thread!!
